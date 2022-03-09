@@ -15,7 +15,7 @@ knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80), tidy=TRUE)
 
 This document outlines the R code that was used across the lectures for Advanced Statistics course at MSc in Psychological Research Methods programme at the University of Sheffield, UK. The code follows the lectures, but also expands on the content covered by the lecture.
 
-# Lecture 1
+# Lecture 1: Linear regression
 
 ## Introduction
 
@@ -285,7 +285,7 @@ mod3.cor<-lm(avg_hatecrimes_per_100k_fbi~median_household_income*gini_index, dat
 summary(mod3.cor)
 ```
 
-# Lecture 3
+# Lecture 3: Path model
 ## Introduction
 
 Adding more variables to our data. It just keeps growing: 
@@ -501,4 +501,306 @@ summary(boot)
 
 ```{r}
 sessionInfo()
+```
+
+# Lecture 4: Confirmatory factor analysis
+
+## Theoretical part
+
+### Data simulation
+
+```{r}
+set.seed(456)
+Babies=data.frame(Age=round(runif(100,1,30)), Weight=rnorm(100,4000,500))
+Babies$Height=rnorm(100,40+0.2*Babies$Age+0.004*Babies$Weight, 5)
+Babies$Gender=rbinom(100,1,0.5)
+Babies$Crawl=rbinom(100,1,0.031*Babies$Age+0.00001*Babies$Weight-0.06*Babies$Gender)
+Babies$TummySleep=rbinom(100,1,0.5)
+Babies$PhysicalSt=rnorm(100,10+0.3*Babies$Height+0.1*Babies$Age-0.06*Babies$Gender+0.15*Babies$TummySleep,5)
+Babies$Gender=as.factor(Babies$Gender)
+levels(Babies$Gender)=c('Girls','Boys')
+```
+
+```{r}
+#install.packages('faux')
+require(faux)
+set.seed(456) #seed specification for the data simulation
+
+#Here I am specifying a correlation matrix for 6 variables. The correlation matrix has 6*6 = 36 values and codes all correlations for variable-by-variable relations. The first value in the first row is correlation of var1 with itself, then we go to var1-var2, var1-var3,... Second row starts with the var2-var1, then var2-var2... 
+
+cmat <- c(1, .4,.4, .1, .1, .1,
+          .4, 1,.3, .1, .1, .1,
+          .4,.2, 1, .1, .1, .1,
+          .1,.1,.1,  1, .4, .4,
+          .1,.1,.1, .4,  1, .2,
+          .1,.1,.1, .4, .2,  1)
+
+vars<-rnorm_multi(n=100, 6,30,5,cmat) # now we take that correlation matrix and simulate 6 variables with 100 values with mean of 30 and sd of 5. 
+
+names(vars)=c('TimeOnTummy','PreciseLegMoves','PreciseHandMoves','Babbling','Screeching','VocalImitation') #Naming of the columns in the vars dataset. 
+
+Babies=cbind(Babies,vars) #combination of Babies data set with new variables. Cbind (Column bind) function adds new columns to Babies dataset. 
+```
+
+### Covariance matrix
+
+```{r}
+Matrix<-cov(vars)
+Matrix[upper.tri(Matrix)]<-NA
+knitr::kable(Matrix, format = 'html')
+```
+
+### Model building
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages('lavaan')
+require(lavaan) #package for our cfa function
+model1<-'
+motor =~ TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ Babbling + Screeching + VocalImitation
+' # our motor LV is regressed onto TimeOnTummy, PreciseLegMoves and PreciseHandMoves, while our verbal LV is regressed onto Babbling, Screeching and VocalImitation. We used reflective coding =~ for LVs indicating that we assume that our LV is causing/influencing behaviour measured in our dataset. 
+
+fit1<-cfa(model1, data=Babies) #fitting the model
+summary(fit1) #summary of the results
+```
+
+### Summary with standardised values
+
+```{r}
+summary(fit1, standardized=TRUE) #with standardised values 
+```
+
+### Model 2: scaling the factors by seting variance to 1: 
+
+```{r}
+model2<-'
+motor =~ NA*TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ NA*Babbling + Screeching + VocalImitation
+motor ~~ 1*motor
+verbal ~~ 1*verbal
+'
+# In this situation we used same specification of the latent factors, but we change the way how the scale of latent variables is defined. We are defining the scale by seting variance of LVs to 1, this is done with motor ~~ 1*motor and verbal ~~ 1*verbal. We also include NA* to two first variables (that are always used to scale LVs) that we would like to estimate.  
+
+fit2<-cfa(model2, data=Babies)
+summary(fit2, standardized=TRUE)
+```
+
+### Model 3: Scaling LVs by effect coding
+
+```{r}
+model3<-'
+motor =~ NA*TimeOnTummy+a*TimeOnTummy + b*PreciseLegMoves + c*PreciseHandMoves
+verbal =~ NA*Babbling+a1*Babbling + b1*Screeching + c1*VocalImitation
+a+b+c==3
+a1+b1+c1==3
+'
+
+# In this situation we used same specification of the latent factors, but we change the way how the scale of latent variables is defined. We are defining the scale by constraining the loadings of manifest variables to latent variable to be the exactly as number of manifest variables loaded onto factor (3 manifest variable == 3). We need to specify that we would like for model to estimate the loading of the first manifest variable:  NA*TimeOnTummy, but also label coefficients with a, b, c, and finally make a constraint that a+b+c == 3 
+
+fit3<-cfa(model3, data=Babies)
+summary(fit3, standardized=TRUE)
+```
+
+### Adding intercepts to our model:
+
+```{r}
+model3<-'
+motor =~ TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ Babbling + Screeching + VocalImitation
+TimeOnTummy ~ 1
+PreciseLegMoves ~ 1
+PreciseHandMoves ~ 1
+Babbling ~ 1
+Screeching ~ 1 
+VocalImitation ~ 1'
+# Model stays again identical to the first one (scaled by the measure of first variables), however we add TimeOnTummy ~ 1 and this is identical for all measured variables.
+fit3<-cfa(model3, data=Babies)
+summary(fit3, standardized=TRUE, fit.measures=T)
+```
+
+### Indices of global model fit
+
+```{r}
+summary(fit1, fit.measures=TRUE)
+```
+
+### Structural equation model: CFA + Path
+
+```{r}
+model4<-'
+#CFA model
+motor =~ TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ Babbling + Screeching + VocalImitation
+
+#Path model
+motor ~ Age + Weight
+verbal ~ Age + Weight
+'
+
+fit4<-sem(model4, data=Babies)
+summary(fit4, standardized=TRUE)
+```
+
+### Measurement invariance
+#### Configural invariance
+
+```{r, warning=FALSE, message=FALSE}
+modelMI<-'
+motor =~ TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ Babbling + Screeching + VocalImitation
+'
+
+fitMIC<-cfa(modelMI, data=Babies, group='Gender') # for configural invariance we can specify group gender and leave all other parameters to be unrestricted
+summary(fitMIC)
+```
+
+#### Metric invariance
+
+In the case of metric invariance we would like to compare loadings on the factor structures between the two groups. If there are no differences between the models (model without restricted loadings fitting worse), then we have same factor loadings between the groups. 
+
+```{r, warning=FALSE, message=FALSE}
+modelMI<-'
+motor =~ TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ Babbling + Screeching + VocalImitation
+'
+
+fitMIM<-cfa(modelMI, data=Babies, group='Gender',group.equal='loadings') #we restrict the loadings on factors between two groups. 
+summary(fitMIM)
+```
+
+```{r}
+#install.packages('semTools')
+require(semTools)
+summary(compareFit(fitMIC, fitMIM)) # compareFit compares our two models and gives as an information of whether one is worse than the other. If model with restricted loadings is worse that is an indication that loadings are different. 
+```
+
+#### Scalar invariance
+
+In the case of scalar invariance we would like to restrict both loadings and intercepts between two groups. Similar to the previous two invariances, when we compare the models if the scalar invariance model fits worse than metric invariance or configural invariance, then we can assume that intercepts or means are not identical between the groups. 
+
+```{r}
+modelMI<-'
+motor =~ TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ Babbling + Screeching + VocalImitation
+'
+
+fitMISc<-cfa(modelMI, data=Babies, group='Gender',group.equal=c('loadings','intercepts')) #Restriction of the loadings and intercepts 
+summary(fitMISc)
+```
+
+```{r}
+summary(compareFit(fitMIM,fitMISc)) # comparison between measurement invariance and scalar invariance model
+```
+
+#### Strict invariance 
+
+Strict invariance restricts loadings, intercepts and error variances. In this case, not only that we are assuming that all direct effects are identical (loadings and intercepts), but we also test whether unexplained variance is identical. This is akin to saying that the same data generating proces and structural effects can be assumed between the two groups. 
+
+```{r}
+modelMI<-'
+motor =~ TimeOnTummy + PreciseLegMoves + PreciseHandMoves
+verbal =~ Babbling + Screeching + VocalImitation
+'
+
+fitMISt<-cfa(modelMI, data=Babies, group='Gender',group.equal=c('loadings','intercepts','residuals')) #restricting loadings, intercepts and residuals
+summary(fitMISt)
+```
+
+```{r}
+summary(compareFit(fitMISc,fitMISt)) # model comparison
+```
+
+#### Finding differences between the models
+If you have differences in the fit of the model, for example, between Measurement invariance and configural invariance model, you would like to see which parameters are different between the groups. You can do that using this function:
+
+```{r}
+lavTestScore(fitMISc)
+```
+
+## Practical part:
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages('sem')
+require(sem)
+data('HS.data') # reading the HS data
+```
+
+### Descriptives: 
+
+```{r}
+dim(HS.data) #dimensions of the dataset
+summary(HS.data[,c('visual','cubes','flags','paragrap','sentence','wordm','addition','counting','straight')]) # descriptive statistics for specific variables in our dataset
+```
+
+### Plots: 
+
+```{r, warning=FALSE, message=FALSE,out.width = '40%',fig.align='center'}
+#install.packages('psych')
+require(psych)
+scatter.hist(x=HS.data$visual,y=HS.data$cubes, density = T, ellipse = T) # bi-variate scatterplot for our data
+```
+
+### Specification of the model: 
+
+```{r}
+detach('package:sem')
+fact3<-'
+spatial =~ visual + cubes + flags
+verbal =~ paragrap + sentence + wordm
+speed =~ addition + counting + straight
+'
+
+fact3fit<-cfa(fact3, data=HS.data)
+summary(fact3fit, fit.measures=TRUE ,standardized=TRUE)
+```
+
+### Explained variance - R2
+
+```{r}
+inspect(fact3fit,'r2') #get r2 for our measured variables
+```
+
+### Multivariate normality
+
+```{r, warning=FALSE, message=FALSE}
+#install.packages('MVN')
+require(MVN)
+test<-mvn(HS.data[,c('visual','cubes','flags','paragrap','sentence','wordm','addition','counting','straight')], mvnTest = 'royston') # multivariate normality for the variables used in our model
+test$multivariateNormality
+```
+
+If we do not have multivariate normality, we can calculate robust errors and different test statistic
+
+```{r}
+fact3fitRob<-cfa(fact3, data=HS.data, se='robust.sem',test='satorra.bentler')
+summary(fact3fitRob,standardized=TRUE)
+```
+
+### Modification indices
+
+Finally, we can check modification indices and include some of them into our model. 
+
+```{r}
+mi <- modindices(fact3fitRob)
+mi
+```
+
+### Change the model
+
+```{r}
+fact3A<-'
+spatial =~ visual + cubes + flags + straight + addition
+verbal =~ paragrap + sentence + wordm
+speed =~ addition + counting + straight
+'
+
+fact3AfitRob<-cfa(fact3A, data=HS.data,se='robust.sem',test='satorra.bentler')
+summary(fact3AfitRob, fit.measures=TRUE ,standardized=TRUE)
+```
+
+### Comparison of the new and original model
+
+```{r}
+diff<-compareFit(fact3fitRob, fact3AfitRob)
+summary(diff)
 ```
